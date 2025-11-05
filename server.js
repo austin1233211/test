@@ -24,6 +24,7 @@ const players = new Map(); // socketId -> player data
 const matchmakingQueue = []; // Array of player IDs waiting for match
 const matches = new Map(); // matchId -> match data
 const playerToMatch = new Map(); // playerId -> matchId
+const roundTimers = new Map(); // matchId -> timer reference
 
 function generateId() {
   return Math.random().toString(36).substring(2, 15);
@@ -86,6 +87,66 @@ function determineWinner(choice1, choice2) {
 
 function isValidChoice(choice) {
   return ['rock', 'paper', 'scissors'].includes(choice);
+}
+
+function getRandomChoice() {
+  const choices = ['rock', 'paper', 'scissors'];
+  return choices[Math.floor(Math.random() * choices.length)];
+}
+
+function clearRoundTimer(matchId) {
+  const timer = roundTimers.get(matchId);
+  if (timer) {
+    clearTimeout(timer);
+    roundTimers.delete(matchId);
+  }
+}
+
+function startRoundTimer(matchId) {
+  clearRoundTimer(matchId);
+  
+  const timer = setTimeout(() => {
+    const match = matches.get(matchId);
+    if (!match || match.phase !== 'playing') {
+      return;
+    }
+    
+    console.log(`[${new Date().toISOString()}] Round timer expired for match ${matchId}`);
+    
+    for (const playerId of match.players) {
+      if (!match.playerData[playerId].ready) {
+        const randomChoice = getRandomChoice();
+        match.playerData[playerId].currentChoice = randomChoice;
+        match.playerData[playerId].ready = true;
+        
+        console.log(`[${new Date().toISOString()}] Auto-assigned ${randomChoice} to ${match.playerData[playerId].name}`);
+        
+        io.to(playerId).emit('choice_auto_assigned', { choice: randomChoice });
+      }
+    }
+    
+    const bothReady = match.players.every(id => match.playerData[id].ready);
+    
+    if (bothReady) {
+      match.round++;
+      const roundResult = processRound(match);
+      
+      console.log(`[${new Date().toISOString()}] Round ${roundResult.round} complete (after timer) - Result: ${roundResult.result}`);
+      
+      io.to(matchId).emit('round_result', roundResult);
+      
+      if (match.phase === 'finished') {
+        console.log(`[${new Date().toISOString()}] Match ${matchId} finished`);
+        clearRoundTimer(matchId);
+        setTimeout(() => cleanupMatch(matchId), 10000);
+      } else {
+        startRoundTimer(matchId);
+      }
+    }
+  }, 15000);
+  
+  roundTimers.set(matchId, timer);
+  io.to(matchId).emit('round_timer_started', { duration: 15 });
 }
 
 function getMatchState(match, playerId) {
@@ -168,6 +229,8 @@ function cleanupMatch(matchId) {
   const match = matches.get(matchId);
   if (!match) return;
   
+  clearRoundTimer(matchId);
+  
   for (const playerId of match.players) {
     playerToMatch.delete(playerId);
   }
@@ -230,6 +293,8 @@ io.on('connection', (socket) => {
       socket.emit('match_found', getMatchState(match, player.id));
       io.to(opponentId).emit('match_found', getMatchState(match, opponent.id));
       
+      startRoundTimer(match.id);
+      
     } else {
       matchmakingQueue.push(player.id);
       socket.emit('matchmaking_status', { status: 'searching' });
@@ -280,6 +345,7 @@ io.on('connection', (socket) => {
     const bothReady = match.players.every(id => match.playerData[id].ready);
     
     if (bothReady) {
+      clearRoundTimer(matchId);
       match.round++;
       
       const roundResult = processRound(match);
@@ -290,7 +356,9 @@ io.on('connection', (socket) => {
       
       if (match.phase === 'finished') {
         console.log(`[${new Date().toISOString()}] Match ${matchId} finished`);
-        setTimeout(() => cleanupMatch(matchId), 10000); // Clean up after 10 seconds
+        setTimeout(() => cleanupMatch(matchId), 10000);
+      } else {
+        startRoundTimer(matchId);
       }
     }
   });

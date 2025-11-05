@@ -5,6 +5,8 @@ let playerName = null;
 let currentMatch = null;
 let playerStats = null;
 let audioContext = null;
+let timerInterval = null;
+let timeRemaining = 15;
 
 function initAudio() {
     try {
@@ -65,6 +67,47 @@ function showScreen(screenId) {
     currentScreen = screenId;
 }
 
+function startTimer(duration) {
+    clearTimer();
+    timeRemaining = duration;
+    
+    const timerDisplay = document.getElementById('timerDisplay');
+    const timerValue = document.getElementById('timerValue');
+    
+    timerDisplay.style.display = 'flex';
+    timerDisplay.classList.remove('warning', 'critical');
+    timerValue.textContent = timeRemaining;
+    
+    timerInterval = setInterval(() => {
+        timeRemaining--;
+        timerValue.textContent = timeRemaining;
+        
+        if (timeRemaining <= 5) {
+            timerDisplay.classList.remove('warning');
+            timerDisplay.classList.add('critical');
+        } else if (timeRemaining <= 10) {
+            timerDisplay.classList.add('warning');
+        }
+        
+        if (timeRemaining <= 0) {
+            clearTimer();
+        }
+    }, 1000);
+}
+
+function clearTimer() {
+    if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
+    
+    const timerDisplay = document.getElementById('timerDisplay');
+    if (timerDisplay) {
+        timerDisplay.style.display = 'none';
+        timerDisplay.classList.remove('warning', 'critical');
+    }
+}
+
 function connectToServer() {
     socket = io();
     
@@ -94,6 +137,7 @@ function connectToServer() {
     
     socket.on('choice_recorded', (data) => {
         playClickSound();
+        clearTimer();
         const buttons = document.querySelectorAll('.choice-btn');
         buttons.forEach(btn => {
             btn.disabled = true;
@@ -113,7 +157,28 @@ function connectToServer() {
     });
     
     socket.on('round_result', (result) => {
+        clearTimer();
         handleRoundResult(result);
+    });
+    
+    socket.on('round_timer_started', (data) => {
+        startTimer(data.duration);
+    });
+    
+    socket.on('choice_auto_assigned', (data) => {
+        playNotificationSound();
+        clearTimer();
+        const buttons = document.querySelectorAll('.choice-btn');
+        buttons.forEach(btn => {
+            btn.disabled = true;
+            if (btn.dataset.choice === data.choice) {
+                btn.classList.add('selected');
+            }
+        });
+        
+        document.getElementById('gameStatus').innerHTML = '<p>Time\'s up! Random choice selected: ' + getChoiceIcon(data.choice) + '</p>';
+        document.getElementById('choiceButtons').style.display = 'none';
+        document.getElementById('waitingMessage').style.display = 'block';
     });
     
     socket.on('chat_message', (message) => {
@@ -279,6 +344,7 @@ document.getElementById('backToMenuButton3').addEventListener('click', () => {
 
 document.getElementById('backToMenuButton4').addEventListener('click', () => {
     playClickSound();
+    clearTimer();
     currentMatch = null;
     showScreen('menuScreen');
 });
