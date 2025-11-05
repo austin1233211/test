@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rock Paper Scissors - Multiplayer</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎮 Rock Paper Scissors</h1>
+            <p class="subtitle">Multiplayer Battle - Best of 3</p>
+        </header>
+
+        <!-- Connection Screen -->
+        <div id="connectionScreen" class="screen active">
+            <div class="card">
+                <h2>Welcome!</h2>
+                <p>Enter your name to start playing</p>
+                <input type="text" id="playerNameInput" placeholder="Your name" maxlength="20">
+                <button id="joinButton" class="btn btn-primary">Join Game</button>
+                <div id="connectionStatus" class="status-message"></div>
+            </div>
+        </div>
+
+        <!-- Menu Screen -->
+        <div id="menuScreen" class="screen">
+            <div class="card">
+                <h2>Choose Game Mode</h2>
+                <p id="welcomeMessage" class="welcome-text"></p>
+                <div class="menu-buttons">
+                    <button id="findMatchButton" class="btn btn-primary btn-large">
+                        <span class="btn-icon">🎲</span>
+                        <span class="btn-text">Find Random Match</span>
+                    </button>
+                    <button id="createRoomButton" class="btn btn-secondary btn-large">
+                        <span class="btn-icon">🚪</span>
+                        <span class="btn-text">Create Private Room</span>
+                    </button>
+                    <button id="joinRoomButton" class="btn btn-secondary btn-large">
+                        <span class="btn-icon">🔑</span>
+                        <span class="btn-text">Join Private Room</span>
+                    </button>
+                    <button id="viewStatsButton" class="btn btn-info btn-large">
+                        <span class="btn-icon">📊</span>
+                        <span class="btn-text">View Stats</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Matchmaking Screen -->
+        <div id="matchmakingScreen" class="screen">
+            <div class="card">
+                <h2>Finding Opponent...</h2>
+                <div class="loading-spinner"></div>
+                <p class="status-text">Searching for an opponent to battle</p>
+                <button id="cancelMatchmakingButton" class="btn btn-secondary">Cancel</button>
+            </div>
+        </div>
+
+        <!-- Room Code Screen -->
+        <div id="roomCodeScreen" class="screen">
+            <div class="card">
+                <h2 id="roomCodeTitle">Room Code</h2>
+                <div id="roomCodeDisplay" class="room-code-display"></div>
+                <p id="roomCodeMessage" class="status-text"></p>
+                <button id="backToMenuButton" class="btn btn-secondary">Back to Menu</button>
+            </div>
+        </div>
+
+        <!-- Join Room Screen -->
+        <div id="joinRoomScreen" class="screen">
+            <div class="card">
+                <h2>Join Private Room</h2>
+                <p>Enter the room code to join</p>
+                <input type="text" id="roomCodeInput" placeholder="Room Code" maxlength="6">
+                <button id="joinRoomSubmitButton" class="btn btn-primary">Join Room</button>
+                <button id="backToMenuButton2" class="btn btn-secondary">Back to Menu</button>
+                <div id="joinRoomStatus" class="status-message"></div>
+            </div>
+        </div>
+
+        <!-- Stats Screen -->
+        <div id="statsScreen" class="screen">
+            <div class="card">
+                <h2>Your Statistics</h2>
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <span class="stat-label">Games Played</span>
+                        <span class="stat-value" id="statGamesPlayed">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Games Won</span>
+                        <span class="stat-value" id="statGamesWon">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Games Lost</span>
+                        <span class="stat-value" id="statGamesLost">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Games Tied</span>
+                        <span class="stat-value" id="statGamesTied">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Rounds Won</span>
+                        <span class="stat-value" id="statRoundsWon">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Rounds Lost</span>
+                        <span class="stat-value" id="statRoundsLost">0</span>
+                    </div>
+                </div>
+                <button id="backToMenuButton3" class="btn btn-secondary">Back to Menu</button>
+            </div>
+        </div>
+
+        <!-- Game Screen -->
+        <div id="gameScreen" class="screen">
+            <div class="game-layout">
+                <div class="game-main">
+                    <div class="game-header">
+                        <div class="player-info">
+                            <h3 id="playerName">You</h3>
+                            <div class="score-display">
+                                <span class="score-label">Score:</span>
+                                <span id="playerScore" class="score-value">0</span>
+                            </div>
+                        </div>
+                        <div class="round-info">
+                            <span id="roundDisplay">Round 0/3</span>
+                            <div id="roomCodeBadge" class="room-code-badge" style="display: none;"></div>
+                        </div>
+                        <div class="player-info opponent">
+                            <h3 id="opponentName">Opponent</h3>
+                            <div class="score-display">
+                                <span class="score-label">Score:</span>
+                                <span id="opponentScore" class="score-value">0</span>
+                            </div>
+                            <div id="opponentStatus" class="connection-status"></div>
+                        </div>
+                    </div>
+
+                    <div class="game-content">
+                        <div id="gameStatus" class="game-status">
+                            <p>Make your choice!</p>
+                        </div>
+
+                        <div id="choiceButtons" class="choice-buttons">
+                            <button class="choice-btn" data-choice="rock">
+                                <span class="choice-icon">✊</span>
+                                <span class="choice-label">Rock</span>
+                            </button>
+                            <button class="choice-btn" data-choice="paper">
+                                <span class="choice-icon">✋</span>
+                                <span class="choice-label">Paper</span>
+                            </button>
+                            <button class="choice-btn" data-choice="scissors">
+                                <span class="choice-icon">✌️</span>
+                                <span class="choice-label">Scissors</span>
+                            </button>
+                        </div>
+
+                        <div id="waitingMessage" class="waiting-message" style="display: none;">
+                            <p>Waiting for opponent...</p>
+                            <div class="loading-dots">
+                                <span></span>
+                                <span></span>
+                                <span></span>
+                            </div>
+                        </div>
+
+                        <div id="roundResult" class="round-result" style="display: none;">
+                            <div class="result-content">
+                                <h3 id="resultTitle"></h3>
+                                <div class="choices-display">
+                                    <div class="choice-result">
+                                        <span class="choice-label-small">You</span>
+                                        <span id="yourChoiceDisplay" class="choice-icon-large"></span>
+                                    </div>
+                                    <span class="vs-text">VS</span>
+                                    <div class="choice-result">
+                                        <span class="choice-label-small">Opponent</span>
+                                        <span id="opponentChoiceDisplay" class="choice-icon-large"></span>
+                                    </div>
+                                </div>
+                                <button id="nextRoundButton" class="btn btn-primary">Next Round</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chat Sidebar -->
+                <div class="chat-sidebar">
+                    <h3>Chat</h3>
+                    <div id="chatMessages" class="chat-messages"></div>
+                    <div class="chat-input-container">
+                        <input type="text" id="chatInput" placeholder="Type a message..." maxlength="100">
+                        <button id="sendChatButton" class="btn btn-small">Send</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Game Over Screen -->
+        <div id="gameOverScreen" class="screen">
+            <div class="card game-over-card">
+                <h2 id="gameOverTitle">Game Over!</h2>
+                <div id="gameOverResult" class="game-over-result"></div>
+                <div class="final-scores">
+                    <div class="final-score">
+                        <span class="final-score-label" id="finalPlayerName">You</span>
+                        <span class="final-score-value" id="finalPlayerScore">0</span>
+                    </div>
+                    <span class="final-score-separator">-</span>
+                    <div class="final-score">
+                        <span class="final-score-label" id="finalOpponentName">Opponent</span>
+                        <span class="final-score-value" id="finalOpponentScore">0</span>
+                    </div>
+                </div>
+                <div class="game-over-buttons">
+                    <button id="rematchButton" class="btn btn-primary">Request Rematch</button>
+                    <button id="backToMenuButton4" class="btn btn-secondary">Back to Menu</button>
+                </div>
+                <div id="rematchStatus" class="status-message"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="game.js"></script>
+</body>
+</html>
