@@ -312,6 +312,47 @@ input[type="text"]:focus {
     color: #667eea;
 }
 
+.timer-display {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    margin-top: 10px;
+    padding: 8px 16px;
+    background: #f8f9fa;
+    border-radius: 20px;
+    font-size: 1.2rem;
+    font-weight: bold;
+    transition: all 0.3s;
+}
+
+.timer-display.warning {
+    background: #fff3cd;
+    color: #856404;
+    animation: pulse 1s infinite;
+}
+
+.timer-display.critical {
+    background: #f8d7da;
+    color: #721c24;
+    animation: pulse 0.5s infinite;
+}
+
+.timer-icon {
+    font-size: 1.2rem;
+}
+
+.timer-value {
+    font-size: 1.3rem;
+    min-width: 30px;
+    text-align: center;
+}
+
+@keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+}
+
 .room-code-badge {
     font-size: 0.9rem;
     color: #666;
