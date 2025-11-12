@@ -26,6 +26,7 @@ const matches = new Map(); // matchId -> match data
 const playerToMatch = new Map(); // playerId -> matchId
 const roundTimers = new Map(); // matchId -> timer reference
 const rooms = new Map(); // roomCode -> { hostId, createdAt }
+const rematchRequests = new Map(); // pairKey -> { requesterId, opponentId, matchId, roomCode, createdAt }
 
 function generateId() {
   return Math.random().toString(36).substring(2, 15);
@@ -38,6 +39,10 @@ function generateRoomCode() {
     code += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return code;
+}
+
+function pairKey(playerId1, playerId2) {
+  return [playerId1, playerId2].sort().join('-');
 }
 
 function createPlayer(socket, name) {
@@ -417,6 +422,135 @@ io.on('connection', (socket) => {
     startRoundTimer(match.id);
   });
   
+  socket.on('request_rematch', () => {
+    const player = players.get(socket.id);
+    if (!player) {
+      socket.emit('error', { message: 'Player not found. Please rejoin.' });
+      return;
+    }
+    
+    const matchId = playerToMatch.get(player.id);
+    if (!matchId) {
+      socket.emit('error', { message: 'No match found' });
+      return;
+    }
+    
+    const match = matches.get(matchId);
+    if (!match) {
+      socket.emit('error', { message: 'Match no longer exists' });
+      return;
+    }
+    
+    if (match.phase !== 'finished') {
+      socket.emit('error', { message: 'Match is still in progress' });
+      return;
+    }
+    
+    const opponentId = match.players.find(id => id !== player.id);
+    const opponent = players.get(opponentId);
+    
+    if (!opponent || !opponent.connected) {
+      socket.emit('error', { message: 'Opponent not available for rematch' });
+      return;
+    }
+    
+    const queueIndex = matchmakingQueue.indexOf(player.id);
+    if (queueIndex > -1) {
+      matchmakingQueue.splice(queueIndex, 1);
+    }
+    
+    const key = pairKey(player.id, opponentId);
+    rematchRequests.set(key, {
+      requesterId: player.id,
+      opponentId: opponentId,
+      matchId: matchId,
+      roomCode: match.roomCode || null,
+      createdAt: Date.now()
+    });
+    
+    console.log(`[${new Date().toISOString()}] ${player.name} requested rematch with ${opponent.name}`);
+    
+    io.to(opponentId).emit('rematch_requested', {
+      playerId: player.id,
+      playerName: match.playerData[player.id].name
+    });
+  });
+  
+  socket.on('accept_rematch', () => {
+    const player = players.get(socket.id);
+    if (!player) {
+      socket.emit('error', { message: 'Player not found. Please rejoin.' });
+      return;
+    }
+    
+    let rematchEntry = null;
+    let rematchKey = null;
+    
+    for (const [key, entry] of rematchRequests.entries()) {
+      if (entry.opponentId === player.id) {
+        rematchEntry = entry;
+        rematchKey = key;
+        break;
+      }
+    }
+    
+    if (!rematchEntry) {
+      socket.emit('error', { message: 'No pending rematch request' });
+      return;
+    }
+    
+    const now = Date.now();
+    const REMATCH_TIMEOUT = 60 * 1000;
+    if (now - rematchEntry.createdAt > REMATCH_TIMEOUT) {
+      rematchRequests.delete(rematchKey);
+      socket.emit('error', { message: 'Rematch request expired' });
+      return;
+    }
+    
+    const requester = players.get(rematchEntry.requesterId);
+    if (!requester || !requester.connected) {
+      rematchRequests.delete(rematchKey);
+      socket.emit('error', { message: 'Requester no longer available' });
+      return;
+    }
+    
+    if (playerToMatch.has(player.id)) {
+      rematchRequests.delete(rematchKey);
+      socket.emit('error', { message: 'You are already in a match' });
+      return;
+    }
+    
+    if (playerToMatch.has(requester.id)) {
+      rematchRequests.delete(rematchKey);
+      socket.emit('error', { message: 'Requester is already in a match' });
+      return;
+    }
+    
+    rematchRequests.delete(rematchKey);
+    
+    const queueIndex1 = matchmakingQueue.indexOf(player.id);
+    if (queueIndex1 > -1) {
+      matchmakingQueue.splice(queueIndex1, 1);
+    }
+    
+    const queueIndex2 = matchmakingQueue.indexOf(requester.id);
+    if (queueIndex2 > -1) {
+      matchmakingQueue.splice(queueIndex2, 1);
+    }
+    
+    const match = createMatch(requester, player, rematchEntry.roomCode);
+    
+    console.log(`[${new Date().toISOString()}] Rematch created: ${match.id} - ${requester.name} vs ${player.name}`);
+    
+    socket.join(match.id);
+    io.sockets.sockets.get(requester.id)?.join(match.id);
+    
+    socket.emit('match_found', getMatchState(match, player.id));
+    io.to(requester.id).emit('match_found', getMatchState(match, requester.id));
+    
+    startRoundTimer(match.id);
+  });
+  
   socket.on('make_choice', (data) => {
     const player = players.get(socket.id);
     if (!player) {
@@ -508,6 +642,13 @@ io.on('connection', (socket) => {
       }
     }
     
+    for (const [key, entry] of rematchRequests.entries()) {
+      if (entry.requesterId === player.id || entry.opponentId === player.id) {
+        rematchRequests.delete(key);
+        console.log(`[${new Date().toISOString()}] Deleted rematch request ${key} (player disconnected)`);
+      }
+    }
+    
     const matchId = playerToMatch.get(player.id);
     if (matchId) {
       const match = matches.get(matchId);
@@ -539,6 +680,7 @@ setInterval(() => {
   const now = Date.now();
   const MATCH_TIMEOUT = 5 * 60 * 1000; // 5 minutes
   const ROOM_TIMEOUT = 10 * 60 * 1000; // 10 minutes
+  const REMATCH_TIMEOUT = 60 * 1000; // 60 seconds
   
   for (const [matchId, match] of matches.entries()) {
     if (now - match.lastActivity > MATCH_TIMEOUT) {
@@ -551,6 +693,13 @@ setInterval(() => {
     if (now - room.createdAt > ROOM_TIMEOUT) {
       console.log(`[${new Date().toISOString()}] Cleaning up expired room: ${roomCode}`);
       rooms.delete(roomCode);
+    }
+  }
+  
+  for (const [key, entry] of rematchRequests.entries()) {
+    if (now - entry.createdAt > REMATCH_TIMEOUT) {
+      console.log(`[${new Date().toISOString()}] Cleaning up expired rematch request: ${key}`);
+      rematchRequests.delete(key);
     }
   }
 }, 60000); // Check every minute
