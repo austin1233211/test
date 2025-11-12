@@ -25,9 +25,19 @@ const matchmakingQueue = []; // Array of player IDs waiting for match
 const matches = new Map(); // matchId -> match data
 const playerToMatch = new Map(); // playerId -> matchId
 const roundTimers = new Map(); // matchId -> timer reference
+const rooms = new Map(); // roomCode -> { hostId, createdAt }
 
 function generateId() {
   return Math.random().toString(36).substring(2, 15);
+}
+
+function generateRoomCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
 }
 
 function createPlayer(socket, name) {
@@ -40,7 +50,7 @@ function createPlayer(socket, name) {
   };
 }
 
-function createMatch(player1, player2) {
+function createMatch(player1, player2, roomCode = null) {
   const matchId = generateId();
   const match = {
     id: matchId,
@@ -62,6 +72,7 @@ function createMatch(player1, player2) {
     round: 0,
     maxRounds: 3,
     phase: 'playing', // 'playing' or 'finished'
+    roomCode: roomCode,
     createdAt: Date.now(),
     lastActivity: Date.now()
   };
@@ -151,6 +162,7 @@ function startRoundTimer(matchId) {
 
 function getMatchState(match, playerId) {
   const opponentId = match.players.find(id => id !== playerId);
+  const opponentConnected = players.has(opponentId) && players.get(opponentId).connected;
   return {
     matchId: match.id,
     round: match.round,
@@ -162,7 +174,9 @@ function getMatchState(match, playerId) {
     opponentName: match.playerData[opponentId].name,
     myChoice: match.playerData[playerId].currentChoice,
     opponentChoice: match.playerData[opponentId].currentChoice,
-    bothPlayersReady: match.playerData[playerId].ready && match.playerData[opponentId].ready
+    bothPlayersReady: match.playerData[playerId].ready && match.playerData[opponentId].ready,
+    roomCode: match.roomCode || null,
+    opponentConnected: opponentConnected
   };
 }
 
@@ -302,6 +316,107 @@ io.on('connection', (socket) => {
     }
   });
   
+  socket.on('create_room', () => {
+    const player = players.get(socket.id);
+    if (!player) {
+      socket.emit('error', { message: 'Player not found. Please rejoin.' });
+      return;
+    }
+    
+    if (playerToMatch.has(player.id)) {
+      socket.emit('error', { message: 'Already in a match' });
+      return;
+    }
+    
+    const queueIndex = matchmakingQueue.indexOf(player.id);
+    if (queueIndex > -1) {
+      matchmakingQueue.splice(queueIndex, 1);
+    }
+    
+    for (const [roomCode, room] of rooms.entries()) {
+      if (room.hostId === player.id) {
+        rooms.delete(roomCode);
+      }
+    }
+    
+    let roomCode;
+    do {
+      roomCode = generateRoomCode();
+    } while (rooms.has(roomCode));
+    
+    rooms.set(roomCode, {
+      hostId: player.id,
+      createdAt: Date.now()
+    });
+    
+    console.log(`[${new Date().toISOString()}] Player ${player.name} created room ${roomCode}`);
+    
+    socket.emit('room_created', { roomCode: roomCode });
+  });
+  
+  socket.on('join_room', (data) => {
+    const player = players.get(socket.id);
+    if (!player) {
+      socket.emit('error', { message: 'Player not found. Please rejoin.' });
+      return;
+    }
+    
+    if (playerToMatch.has(player.id)) {
+      socket.emit('error', { message: 'Already in a match' });
+      return;
+    }
+    
+    const queueIndex = matchmakingQueue.indexOf(player.id);
+    if (queueIndex > -1) {
+      matchmakingQueue.splice(queueIndex, 1);
+    }
+    
+    const roomCode = data?.roomCode?.trim().toUpperCase();
+    
+    if (!roomCode || !/^[A-Z0-9]{6}$/.test(roomCode)) {
+      socket.emit('error', { message: 'Invalid room code format' });
+      return;
+    }
+    
+    const room = rooms.get(roomCode);
+    if (!room) {
+      socket.emit('error', { message: 'Room not found' });
+      return;
+    }
+    
+    if (room.hostId === player.id) {
+      socket.emit('error', { message: 'Cannot join your own room' });
+      return;
+    }
+    
+    const host = players.get(room.hostId);
+    if (!host || !host.connected) {
+      rooms.delete(roomCode);
+      socket.emit('error', { message: 'Room no longer available' });
+      return;
+    }
+    
+    if (playerToMatch.has(host.id)) {
+      rooms.delete(roomCode);
+      socket.emit('error', { message: 'Host is already in a match' });
+      return;
+    }
+    
+    rooms.delete(roomCode);
+    
+    const match = createMatch(host, player, roomCode);
+    
+    console.log(`[${new Date().toISOString()}] Match created from room ${roomCode}: ${match.id} - ${host.name} vs ${player.name}`);
+    
+    socket.join(match.id);
+    io.sockets.sockets.get(host.id)?.join(match.id);
+    
+    socket.emit('match_found', getMatchState(match, player.id));
+    io.to(host.id).emit('match_found', getMatchState(match, host.id));
+    
+    startRoundTimer(match.id);
+  });
+  
   socket.on('make_choice', (data) => {
     const player = players.get(socket.id);
     if (!player) {
@@ -386,6 +501,13 @@ io.on('connection', (socket) => {
       matchmakingQueue.splice(queueIndex, 1);
     }
     
+    for (const [roomCode, room] of rooms.entries()) {
+      if (room.hostId === player.id) {
+        rooms.delete(roomCode);
+        console.log(`[${new Date().toISOString()}] Deleted room ${roomCode} (host disconnected)`);
+      }
+    }
+    
     const matchId = playerToMatch.get(player.id);
     if (matchId) {
       const match = matches.get(matchId);
@@ -416,11 +538,19 @@ io.on('connection', (socket) => {
 setInterval(() => {
   const now = Date.now();
   const MATCH_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+  const ROOM_TIMEOUT = 10 * 60 * 1000; // 10 minutes
   
   for (const [matchId, match] of matches.entries()) {
     if (now - match.lastActivity > MATCH_TIMEOUT) {
       console.log(`[${new Date().toISOString()}] Cleaning up inactive match: ${matchId}`);
       cleanupMatch(matchId);
+    }
+  }
+  
+  for (const [roomCode, room] of rooms.entries()) {
+    if (now - room.createdAt > ROOM_TIMEOUT) {
+      console.log(`[${new Date().toISOString()}] Cleaning up expired room: ${roomCode}`);
+      rooms.delete(roomCode);
     }
   }
 }, 60000); // Check every minute
